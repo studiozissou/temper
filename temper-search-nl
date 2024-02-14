@@ -1,0 +1,147 @@
+$(async () => {
+  const categoriesEndpoint = 'https://temper.works/api/v3/job-sections?include=job_categories';
+  const categoriesResponse = await fetch(categoriesEndpoint, { credentials: 'include' });
+  const { data: sectionsData } = await categoriesResponse.json();
+  const sections = sectionsData.reduce((acc, section) => {
+    acc.push({
+      name: section.name_translation['en_GB'],
+      categories: section.job_categories.data.map(x => x.id)
+    });
+
+    return acc;
+  }, []);
+
+  const $geocodeResults = $('#geocode-results');
+  const $searchList = $geocodeResults.find('.search-list');
+  const $locationInput = $('#autoInput');
+  const $dropdown = $(".w-dropdown");
+  const $workInput = $('input[name="Work"]');
+  const searchData = {
+    section: -1,
+    location: null,
+    autocompleteTimeout: null,
+    autocompleteElements: [],
+  };
+
+  const makeWorkListItem = name => $(`<li><div class="dropdown-text">${name}</div></li>`);
+  const changeName = ($item, name) => $item.find('.dropdown-text').text(name);
+
+  const $allFunctions = makeWorkListItem('');
+
+  async function setLabel() {
+    changeName($allFunctions, 'All categories');
+
+    if (searchData.section === -1) {
+      $workInput.attr('placeholder', 'All categories');
+    }
+  }
+
+  setLabel();
+
+  const $listItems = [
+    $allFunctions,
+  ];
+
+  $allFunctions.on('click', () => {
+    searchData.section = -1;
+    $workInput.attr('placeholder', $allFunctions.find('.dropdown-text').text());
+    $dropdown.trigger("w-close");
+  });
+
+  $listItems.push(...sections.map((section, index) => {
+    const $item = makeWorkListItem(section.name);
+
+    $item.on('click', () => {
+      searchData.section = index;
+      $workInput.attr('placeholder', section.name);
+      $dropdown.trigger("w-close");
+    });
+
+    return $item;
+  }));
+
+  $('#work-list').html($listItems);
+
+  function showResults() {
+    if ($searchList.children().length === 0) return;
+    $geocodeResults.show();
+  }
+
+  async function fillAutoCompleteList() {
+    const response = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent($locationInput.val())}.json?country=nl&access_token=pk.eyJ1IjoidGVtcGVyd29ya3MiLCJhIjoiY2pua21rZzBkMTU0cjNrcDd2aTF1anQxaSJ9.X-2pFA89Z4ffp_T8qfesqA&types=place%2Caddress%2Cneighborhood%2Cpostcode`);
+    const { features } = await response.json();
+
+    searchData.autocompleteElements.forEach($x => $x.off());
+
+    searchData.autocompleteElements.length = 0;
+
+    if (features.length > 0) {
+      features.forEach(({ place_type, text, context, place_name, center }) => {
+        const label = (place_type[0] === 'neighborhood' || place_type[0] === 'address') && context && context.length > 0 ? `, ${context[context.length - 1].text}` : `, ${text}`;
+
+        const $item = $(`<li><a href="#" class="list-term">${text}${label}</a></li>`);
+
+        $item.on('mousedown', e => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          searchData.location = center.reverse();
+
+          $locationInput.val(place_name);
+
+          $locationInput.blur();
+        });
+
+        searchData.autocompleteElements.push($item);
+      });
+
+      $geocodeResults.show();
+    } else {
+      $geocodeResults.hide();
+    }
+
+    $searchList.html(searchData.autocompleteElements);
+
+    showResults();
+  }
+
+  $locationInput.on('focus', () => {
+    showResults();
+  });
+
+  $locationInput.on('blur', e => {
+    $geocodeResults.hide();
+  });
+
+  $locationInput.on('keyup', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    clearTimeout(searchData.autocompleteTimeout);
+
+    searchData.location = null;
+
+    if ($locationInput.val().trim() === '') {
+      $geocodeResults.hide();
+      return;
+    }
+
+    searchData.autocompleteTimeout = setTimeout(fillAutoCompleteList, 250);
+  });
+
+  $('#email-form').on('submit', e => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const urlParts = ['https://temper.works/werk-zoeken'];
+
+    if (searchData.section > -1) {
+      urlParts.push('categories', sections[searchData.section].categories.join());
+    }
+
+    if (searchData.location) {
+      urlParts.push('location', ...searchData.location);
+    }
+
+    window.top.location = urlParts.join('/');
+  });
+});
